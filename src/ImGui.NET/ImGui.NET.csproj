@@ -30,18 +30,26 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\..\deps\cimgui\win-x86\cimgui.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>runtimes\win-x86\native\cimgui.dll</Link>
       <PackagePath>runtimes/win-x86/native</PackagePath>
       <Pack>true</Pack>
     </Content>
     <Content Include="..\..\deps\cimgui\win-x64\cimgui.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>runtimes\win-x64\native\cimgui.dll</Link>
       <PackagePath>runtimes/win-x64/native</PackagePath>
       <Pack>true</Pack>
     </Content>
     <Content Include="..\..\deps\cimgui\linux-x64\cimgui.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>runtimes\linux-x64\native\cimgui.so</Link>
       <PackagePath>runtimes/linux-x64/native/libcimgui.so</PackagePath>
       <Pack>true</Pack>
     </Content>
     <Content Include="..\..\deps\cimgui\osx\cimgui.dylib">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>runtimes\osx\native\cimgui.dylib</Link>
       <PackagePath>runtimes/osx/native/libcimgui.dylib</PackagePath>
       <Pack>true</Pack>
     </Content>
