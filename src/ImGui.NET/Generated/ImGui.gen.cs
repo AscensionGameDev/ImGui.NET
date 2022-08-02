@@ -10868,16 +10868,16 @@ namespace ImGuiNET
         }
         public static void SetNextWindowSizeConstraints(Vector2 size_min, Vector2 size_max)
         {
-            ImGuiSizeCallback custom_callback = null;
+            IntPtr custom_callback = IntPtr.Zero;
             void* custom_callback_data = null;
             ImGuiNative.igSetNextWindowSizeConstraints(size_min, size_max, custom_callback, custom_callback_data);
         }
-        public static void SetNextWindowSizeConstraints(Vector2 size_min, Vector2 size_max, ImGuiSizeCallback custom_callback)
+        public static void SetNextWindowSizeConstraints(Vector2 size_min, Vector2 size_max, IntPtr custom_callback)
         {
             void* custom_callback_data = null;
             ImGuiNative.igSetNextWindowSizeConstraints(size_min, size_max, custom_callback, custom_callback_data);
         }
-        public static void SetNextWindowSizeConstraints(Vector2 size_min, Vector2 size_max, ImGuiSizeCallback custom_callback, IntPtr custom_callback_data)
+        public static void SetNextWindowSizeConstraints(Vector2 size_min, Vector2 size_max, IntPtr custom_callback, IntPtr custom_callback_data)
         {
             void* native_custom_callback_data = (void*)custom_callback_data.ToPointer();
             ImGuiNative.igSetNextWindowSizeConstraints(size_min, size_max, custom_callback, native_custom_callback_data);

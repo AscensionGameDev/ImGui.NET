@@ -589,7 +589,7 @@ namespace ImGuiNET
         [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
         public static extern void igSetNextWindowSize(Vector2 size, ImGuiCond cond);
         [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
-        public static extern void igSetNextWindowSizeConstraints(Vector2 size_min, Vector2 size_max, ImGuiSizeCallback custom_callback, void* custom_callback_data);
+        public static extern void igSetNextWindowSizeConstraints(Vector2 size_min, Vector2 size_max, IntPtr custom_callback, void* custom_callback_data);
         [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
         public static extern void igSetNextWindowViewport(uint viewport_id);
         [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
@@ -1171,13 +1171,11 @@ namespace ImGuiNET
         [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
         public static extern void ImGuiStorage_SetVoidPtr(ImGuiStorage* self, uint key, void* val);
         [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
-        public static extern void ImGuiStoragePair_destroy(ImGuiStoragePair* self);
+        public static extern IntPtr* ImGuiStoragePair_ImGuiStoragePair_Int(uint _key, int _val_i);
         [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
-        public static extern ImGuiStoragePair* ImGuiStoragePair_ImGuiStoragePair_Int(uint _key, int _val_i);
+        public static extern IntPtr* ImGuiStoragePair_ImGuiStoragePair_Float(uint _key, float _val_f);
         [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
-        public static extern ImGuiStoragePair* ImGuiStoragePair_ImGuiStoragePair_Float(uint _key, float _val_f);
-        [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
-        public static extern ImGuiStoragePair* ImGuiStoragePair_ImGuiStoragePair_Ptr(uint _key, void* _val_p);
+        public static extern IntPtr* ImGuiStoragePair_ImGuiStoragePair_Ptr(uint _key, void* _val_p);
         [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
         public static extern void ImGuiStyle_destroy(ImGuiStyle* self);
         [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]

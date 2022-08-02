@@ -102,6 +102,24 @@ namespace CodeGenerator
             {
                 if (TypeInfo.CustomDefinedTypes.Contains(td.Name)) { continue; }
 
+                // if (td.Location == Location.Internal
+                //     && !defs.Functions.Any(
+                //         fn => fn.Overloads.Any(
+                //             fno =>
+                //                 !(fno.IsConstructor || fno.IsDestructor)
+                //                 && (
+                //                     fno.ReturnType.Contains(td.Name)
+                //                     || fno.Parameters.Any(
+                //                         fnop => fnop.Type.Contains(td.Name)
+                //                     )
+                //                 )
+                //         )
+                //     )
+                // )
+                // {
+                //     continue;
+                // }
+
                 using (CSharpCodeWriter writer = new CSharpCodeWriter(Path.Combine(outputPath, td.Name + ".gen.cs")))
                 {
                     writer.Using("System");
@@ -163,7 +181,12 @@ namespace CodeGenerator
                         if (field.ArraySize != 0)
                         {
                             string addrTarget = TypeInfo.LegalFixedTypes.Contains(rawType) ? $"NativePtr->{field.Name}" : $"&NativePtr->{field.Name}_0";
-                            writer.WriteLine($"public RangeAccessor<{typeStr}> {field.Name} => new RangeAccessor<{typeStr}>({addrTarget}, {field.ArraySize});");
+                            var rangeTypeStr = typeStr;
+                            if (rangeTypeStr.Contains("*"))
+                            {
+                                rangeTypeStr = $"{typeStr[..^1]}Ptr";
+                            }
+                            writer.WriteLine($"public RangeAccessor<{rangeTypeStr}> {field.Name} => new RangeAccessor<{rangeTypeStr}>({addrTarget}, {field.ArraySize});");
                         }
                         else if (typeStr.Contains("ImVector"))
                         {
@@ -270,138 +293,157 @@ namespace CodeGenerator
                 }
             }
 
-            using (CSharpCodeWriter writer = new CSharpCodeWriter(Path.Combine(outputPath, $"{classPrefix}Native.gen.cs")))
+            void GenerateWrappers(Location location)
             {
-                writer.Using("System");
-                writer.Using("System.Numerics");
-                writer.Using("System.Runtime.InteropServices");
-                if (referencesImGui)
+                var classSuffix = string.Empty;
+                var nativeFileName = $"{classPrefix}Native.gen.cs";
+                var normalFileName = $"{classPrefix}.gen.cs";
+                if (location == Location.Internal)
                 {
-                    writer.Using("ImGuiNET");
+                    classSuffix = "Internal";
+                    nativeFileName = $"{classPrefix}Native.Internal.gen.cs";
+                    normalFileName = $"{classPrefix}.Internal.gen.cs";
                 }
-                writer.WriteLine(string.Empty);
-                writer.PushBlock($"namespace {projectNamespace}");
-                writer.PushBlock($"public static unsafe partial class {classPrefix}Native");
-                foreach (FunctionDefinition fd in defs.Functions)
+
+                using (CSharpCodeWriter writer = new CSharpCodeWriter(Path.Combine(outputPath, nativeFileName)))
                 {
-                    foreach (OverloadDefinition overload in fd.Overloads)
+                    writer.Using("System");
+                    writer.Using("System.Numerics");
+                    writer.Using("System.Runtime.InteropServices");
+                    if (referencesImGui)
                     {
-                        string exportedName = overload.ExportedName;
-                        if (exportedName.Contains("~")) { continue; }
-                        if (exportedName.Contains("ImVector_")) { continue; }
-                        if (exportedName.Contains("ImChunkStream_")) { continue; }
-
-                        if (overload.Parameters.Any(tr => tr.Type.Contains('('))) { continue; } // TODO: Parse function pointer parameters.
-
-                        string ret = GetTypeString(overload.ReturnType, false);
-
-                        bool hasVaList = false;
-                        List<string> paramParts = new List<string>();
-                        for (int i = 0; i < overload.Parameters.Length; i++)
-                        {
-                            TypeReference p = overload.Parameters[i];
-                            string paramType = GetTypeString(p.Type, p.IsFunctionPointer);
-                            if (p.ArraySize != 0)
-                            {
-                                paramType = paramType + "*";
-                            }
-
-                            if (p.Name == "...") { continue; }
-
-                            paramParts.Add($"{paramType} {CorrectIdentifier(p.Name)}");
-
-                            if (paramType == "va_list")
-                            {
-                                hasVaList = true;
-                                break;
-                            }
-                        }
-
-                        if (hasVaList) { continue; }
-
-                        string parameters = string.Join(", ", paramParts);
-
-                        bool isUdtVariant = exportedName.Contains("nonUDT");
-                        string methodName = isUdtVariant
-                            ? exportedName.Substring(0, exportedName.IndexOf("_nonUDT"))
-                            : exportedName;
-
-                        if (isUdtVariant)
-                        {
-                            writer.WriteLine($"[DllImport(\"{dllName}\", CallingConvention = CallingConvention.Cdecl, EntryPoint = \"{exportedName}\")]");
-
-                        }
-                        else
-                        {
-                            writer.WriteLine($"[DllImport(\"{dllName}\", CallingConvention = CallingConvention.Cdecl)]");
-                        }
-                        writer.WriteLine($"public static extern {ret} {methodName}({parameters});");
+                        writer.Using("ImGuiNET");
                     }
-                }
-                writer.PopBlock();
-                writer.PopBlock();
-            }
-
-            using (CSharpCodeWriter writer = new CSharpCodeWriter(Path.Combine(outputPath, $"{classPrefix}.gen.cs")))
-            {
-                writer.Using("System");
-                writer.Using("System.Numerics");
-                writer.Using("System.Runtime.InteropServices");
-                writer.Using("System.Text");
-                if (referencesImGui)
-                {
-                    writer.Using("ImGuiNET");
-                }
-                writer.WriteLine(string.Empty);
-                writer.PushBlock($"namespace {projectNamespace}");
-                writer.PushBlock($"public static unsafe partial class {classPrefix}");
-                foreach (FunctionDefinition fd in defs.Functions)
-                {
-                    if (TypeInfo.SkippedFunctions.Contains(fd.Name)) { continue; }
-
-                    foreach (OverloadDefinition overload in fd.Overloads)
+                    writer.WriteLine(string.Empty);
+                    writer.PushBlock($"namespace {projectNamespace}");
+                    writer.PushBlock($"public static unsafe partial class {classPrefix}Native{classSuffix}");
+                    foreach (FunctionDefinition fd in defs.Functions)
                     {
-                        string exportedName = overload.ExportedName;
-                        if (exportedName.StartsWith("ig"))
+                        foreach (OverloadDefinition overload in fd.Overloads)
                         {
-                            exportedName = exportedName.Substring(2, exportedName.Length - 2);
-                        }
-                        if (exportedName.Contains("~")) { continue; }
-                        if (overload.Parameters.Any(tr => tr.Type.Contains('('))) { continue; } // TODO: Parse function pointer parameters.
+                            if (overload.Location != location && (overload.Location != Location.Unknown || location != Location.Public)) { continue; }
+                            string exportedName = overload.ExportedName;
+                            if (exportedName.Contains("~")) { continue; }
+                            if (exportedName.Contains("ImVector_")) { continue; }
+                            if (exportedName.Contains("ImChunkStream_")) { continue; }
 
-                        bool hasVaList = false;
-                        for (int i = 0; i < overload.Parameters.Length; i++)
-                        {
-                            TypeReference p = overload.Parameters[i];
-                            string paramType = GetTypeString(p.Type, p.IsFunctionPointer);
-                            if (p.Name == "...") { continue; }
+                            if (overload.Parameters.Any(tr => tr.Type.Contains('('))) { continue; } // TODO: Parse function pointer parameters.
 
-                            if (paramType == "va_list")
+                            string ret = GetTypeString(overload.ReturnType, false);
+
+                            bool hasVaList = false;
+                            List<string> paramParts = new List<string>();
+                            for (int i = 0; i < overload.Parameters.Length; i++)
                             {
-                                hasVaList = true;
-                                break;
+                                TypeReference p = overload.Parameters[i];
+                                string paramType = GetTypeString(p.Type, p.IsFunctionPointer);
+                                if (p.ArraySize != 0)
+                                {
+                                    paramType = paramType + "*";
+                                }
+
+                                if (p.Name == "...") { continue; }
+
+                                paramParts.Add($"{paramType} {CorrectIdentifier(p.Name)}");
+
+                                if (paramType == "va_list")
+                                {
+                                    hasVaList = true;
+                                    break;
+                                }
                             }
-                        }
-                        if (hasVaList) { continue; }
 
-                        KeyValuePair<string, string>[] orderedDefaults = overload.DefaultValues.OrderByDescending(
-                            kvp => GetIndex(overload.Parameters, kvp.Key)).ToArray();
+                            if (hasVaList) { continue; }
 
-                        for (int i = overload.DefaultValues.Count; i >= 0; i--)
-                        {
-                            if (overload.IsMemberFunction) { continue; }
-                            Dictionary<string, string> defaults = new Dictionary<string, string>();
-                            for (int j = 0; j < i; j++)
+                            string parameters = string.Join(", ", paramParts);
+
+                            bool isUdtVariant = exportedName.Contains("nonUDT");
+                            string methodName = isUdtVariant
+                                ? exportedName.Substring(0, exportedName.IndexOf("_nonUDT"))
+                                : exportedName;
+
+                            if (isUdtVariant)
                             {
-                                defaults.Add(orderedDefaults[j].Key, orderedDefaults[j].Value);
+                                writer.WriteLine($"[DllImport(\"{dllName}\", CallingConvention = CallingConvention.Cdecl, EntryPoint = \"{exportedName}\")]");
+
                             }
-                            EmitOverload(writer, overload, defaults, null, classPrefix);
+                            else
+                            {
+                                writer.WriteLine($"[DllImport(\"{dllName}\", CallingConvention = CallingConvention.Cdecl)]");
+                            }
+                            writer.WriteLine($"public static extern {ret} {methodName}({parameters});");
                         }
                     }
+                    writer.PopBlock();
+                    writer.PopBlock();
                 }
-                writer.PopBlock();
-                writer.PopBlock();
+
+
+                using (CSharpCodeWriter writer = new CSharpCodeWriter(Path.Combine(outputPath, normalFileName)))
+                {
+                    writer.Using("System");
+                    writer.Using("System.Numerics");
+                    writer.Using("System.Runtime.InteropServices");
+                    writer.Using("System.Text");
+                    if (referencesImGui)
+                    {
+                        writer.Using("ImGuiNET");
+                    }
+                    writer.WriteLine(string.Empty);
+                    writer.PushBlock($"namespace {projectNamespace}");
+                    writer.PushBlock($"public static unsafe partial class {classPrefix}{classSuffix}");
+                    foreach (FunctionDefinition fd in defs.Functions)
+                    {
+                        if (TypeInfo.SkippedFunctions.Contains(fd.Name)) { continue; }
+
+                        foreach (OverloadDefinition overload in fd.Overloads)
+                        {
+                            if (overload.Location != location) { continue; }
+                            string exportedName = overload.ExportedName;
+                            if (exportedName.StartsWith("ig"))
+                            {
+                                exportedName = exportedName.Substring(2, exportedName.Length - 2);
+                            }
+                            if (exportedName.Contains("~")) { continue; }
+                            if (overload.Parameters.Any(tr => tr.Type.Contains('('))) { continue; } // TODO: Parse function pointer parameters.
+
+                            bool hasVaList = false;
+                            for (int i = 0; i < overload.Parameters.Length; i++)
+                            {
+                                TypeReference p = overload.Parameters[i];
+                                string paramType = GetTypeString(p.Type, p.IsFunctionPointer);
+                                if (p.Name == "...") { continue; }
+
+                                if (paramType == "va_list")
+                                {
+                                    hasVaList = true;
+                                    break;
+                                }
+                            }
+                            if (hasVaList) { continue; }
+
+                            KeyValuePair<string, string>[] orderedDefaults = overload.DefaultValues.OrderByDescending(
+                                kvp => GetIndex(overload.Parameters, kvp.Key)).ToArray();
+
+                            for (int i = overload.DefaultValues.Count; i >= 0; i--)
+                            {
+                                if (overload.IsMemberFunction) { continue; }
+                                Dictionary<string, string> defaults = new Dictionary<string, string>();
+                                for (int j = 0; j < i; j++)
+                                {
+                                    defaults.Add(orderedDefaults[j].Key, orderedDefaults[j].Value);
+                                }
+                                EmitOverload(writer, overload, defaults, null, classPrefix);
+                            }
+                        }
+                    }
+                    writer.PopBlock();
+                    writer.PopBlock();
+                }
             }
+
+            GenerateWrappers(Location.Public);
+            GenerateWrappers(Location.Internal);
 
             foreach (var method in defs.Variants)
             {
@@ -492,7 +534,7 @@ namespace CodeGenerator
                     if (defaultValues.TryGetValue(tr.Name, out string defaultStrVal))
                     {
                         hasDefault = true;
-                        if (!CorrectDefaultValue(defaultStrVal, tr, out string correctedDefault))
+                        if (!CorrectDefaultValue(defaultStrVal, tr, default, out string correctedDefault))
                         {
                             correctedDefault = defaultStrVal;
                         }
@@ -543,7 +585,7 @@ namespace CodeGenerator
                 }
                 else if (defaultValues.TryGetValue(tr.Name, out string defaultVal))
                 {
-                    if (!CorrectDefaultValue(defaultVal, tr, out string correctedDefault))
+                    if (!CorrectDefaultValue(defaultVal, tr, nativeTypeName == "IntPtr" ? nativeTypeName : default, out string correctedDefault))
                     {
                         correctedDefault = defaultVal;
                     }
@@ -679,10 +721,21 @@ namespace CodeGenerator
                 if (mp.IsPinned)
                 {
                     string nativePinType = GetTypeString(tr.Type, false);
+                    if (nativePinType == "IntPtr")
+                    {
+                        nativePinType = tr.Type;
+                        nativeInvocationArgs.Add($"(IntPtr){mp.VarName}");
+                    }
+                    else
+                    {
+                        nativeInvocationArgs.Add(mp.VarName);
+                    }
                     writer.PushBlock($"fixed ({nativePinType} native_{tr.Name} = &{mp.PinTarget})");
                 }
-
-                nativeInvocationArgs.Add(mp.VarName);
+                else
+                {
+                    nativeInvocationArgs.Add(mp.VarName);
+                }
             }
 
             string nativeInvocationStr = string.Join(", ", nativeInvocationArgs);
@@ -694,7 +747,8 @@ namespace CodeGenerator
                 targetName = targetName.Substring(0, targetName.IndexOf("_nonUDT"));
             }
 
-            writer.WriteLine($"{ret}{classPrefix}Native.{targetName}({nativeInvocationStr});");
+            var classSuffix = overload.Location == Location.Internal ? "Internal" : string.Empty;
+            writer.WriteLine($"{ret}{classPrefix}Native{classSuffix}.{targetName}({nativeInvocationStr});");
 
             foreach (string line in postCallLines)
             {
@@ -794,9 +848,10 @@ namespace CodeGenerator
             }
         }
 
-        private static bool CorrectDefaultValue(string defaultVal, TypeReference tr, out string correctedDefault)
+        private static bool CorrectDefaultValue(string defaultVal, TypeReference tr, string nativeTypeName, out string correctedDefault)
         {
-            if (tr.Type == "ImGuiContext*" || tr.Type == "ImPlotContext*" || tr.Type == "EditorContext*")
+            var typeName = nativeTypeName ?? tr.Type;
+            if (typeName == "IntPtr" || typeName == "ImGuiContext*" || typeName == "ImPlotContext*" || typeName == "EditorContext*")
             {
                 correctedDefault = "IntPtr.Zero";
                 return true;
@@ -804,7 +859,7 @@ namespace CodeGenerator
 
             if (TypeInfo.WellKnownDefaultValues.TryGetValue(defaultVal, out correctedDefault)) { return true; }
 
-            if (tr.Type == "bool")
+            if (typeName == "bool")
             {
                 correctedDefault = bool.Parse(defaultVal) ? "1" : "0";
                 return true;
@@ -816,11 +871,11 @@ namespace CodeGenerator
             {
                 if (defaultVal.StartsWith("-"))
                 {
-                    correctedDefault = $"({tr.Type})({defaultVal})";
+                    correctedDefault = $"({typeName})({defaultVal})";
                 }
                 else
                 {
-                    correctedDefault = $"({tr.Type}){defaultVal}";
+                    correctedDefault = $"({typeName}){defaultVal}";
                 }
                 return true;
             }
@@ -839,7 +894,7 @@ namespace CodeGenerator
             {
                 if (TypeInfo.WellKnownTypes.TryGetValue(typeName.Substring(0, typeName.Length - pointerLevel), out typeStr))
                 {
-                    typeStr = typeStr + new string('*', pointerLevel);
+                    typeStr += new string('*', pointerLevel);
                 }
                 else if (!TypeInfo.WellKnownTypes.TryGetValue(typeName, out typeStr))
                 {

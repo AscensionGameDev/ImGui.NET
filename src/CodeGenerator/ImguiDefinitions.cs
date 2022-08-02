@@ -65,22 +65,36 @@ namespace CodeGenerator
             {
                 JProperty jp = (JProperty)jt;
                 string name = jp.Name;
-                if (typeLocations?[jp.Name]?.Value<string>().Contains("internal") ?? false) {
-                    return null;
+                var strlocation = typeLocations?[jp.Name]?.Value<string>();
+                var location = Location.Public;
+                if (string.IsNullOrWhiteSpace(strlocation))
+                {
+                    location = Location.Unknown;
+                }
+                else if (strlocation.Contains("internal"))
+                {
+                    location = Location.Internal;
                 }
                 EnumMember[] elements = jp.Values().Select(v =>
                 {
                     return new EnumMember(v["name"].ToString(), v["calc_value"].ToString());
                 }).ToArray();
-                return new EnumDefinition(name, elements);
+                return new EnumDefinition(name, location, elements);
             }).Where(x => x != null).ToArray();
 
             Types = typesJson["structs"].Select(jt =>
             {
                 JProperty jp = (JProperty)jt;
                 string name = jp.Name;
-                if (typeLocations?[jp.Name]?.Value<string>().Contains("internal") ?? false) {
-                    return null;
+                var strlocation = typeLocations?[jp.Name]?.Value<string>();
+                var location = Location.Public;
+                if (string.IsNullOrWhiteSpace(strlocation))
+                {
+                    location = Location.Unknown;
+                }
+                else if (strlocation.Contains("internal"))
+                {
+                    location = Location.Internal;
                 }
                 TypeReference[] fields = jp.Values().Select(v =>
                 {
@@ -94,7 +108,7 @@ namespace CodeGenerator
                         v["template_type"]?.ToString(),
                         Enums);
                 }).Where(tr => tr != null).ToArray();
-                return new TypeDefinition(name, fields);
+                return new TypeDefinition(name, location, fields);
             }).Where(x => x != null).ToArray();
 
             Functions = functionsJson.Children().Select(jt =>
@@ -112,15 +126,34 @@ namespace CodeGenerator
                         friendlyName = "Destroy";
                     }
                     //skip internal functions
-                    var typename = val["stname"]?.ToString();
-                    if (!string.IsNullOrEmpty(typename))
+                    var strlocation = val["location"]?.ToString();
+                    var location = Location.Public;
+                    if (string.IsNullOrWhiteSpace(strlocation))
                     {
-                        if (!Types.Any(x => x.Name == val["stname"]?.ToString())) {
-                            return null;
+                        location = Location.Unknown;
+                    }
+                    else if (strlocation.Contains("internal"))
+                    {
+                        location = Location.Internal;
+                    }
+
+                    var stname = val["stname"]?.ToString();
+                    if (!string.IsNullOrEmpty(stname))
+                    {
+                        var sttype = Types.FirstOrDefault(x => x.Name == stname);
+                        switch (sttype?.Location)
+                        {
+                            case Location.Public:
+                                break;
+                            case Location.Unknown:
+                                sttype.Location = location;
+                                break;
+                            case Location.Internal when location == Location.Internal:
+                            default:
+                                return default;
                         }
                     }
                     if (friendlyName == null) { return null; }
-                    if (val["location"]?.ToString().Contains("internal") ?? false) return null;
 
                     string exportedName = ov_cimguiname;
                     if (exportedName == null)
@@ -167,21 +200,21 @@ namespace CodeGenerator
                     string returnType = val["ret"]?.ToString() ?? "void";
                     string comment = null;
 
-                    string structName = val["stname"].ToString();
                     bool isConstructor = val.Value<bool>("constructor");
                     bool isDestructor = val.Value<bool>("destructor");
                     if (isConstructor)
                     {
-                        returnType = structName + "*";
+                        returnType = stname + "*";
                     }
 
                     return new OverloadDefinition(
+                        location,
                         exportedName,
                         friendlyName,
                         parameters.ToArray(),
                         defaultValues,
                         returnType,
-                        structName,
+                        stname,
                         comment,
                         isConstructor,
                         isDestructor);
@@ -189,9 +222,124 @@ namespace CodeGenerator
                 if(overloads.Length == 0) return null;
                 return new FunctionDefinition(name, overloads, Enums);
             }).Where(x => x != null).OrderBy(fd => fd.Name).ToArray();
+
+            Types = Types.Where(td =>
+            {
+                return td.Fields.All(fd => fd.IsEnum
+                    ? Enums.Any(ed => ed.FriendlyName == fd.Type)
+                    : (fd.IsFunctionPointer || IsValidCustomTypeOrBuiltIn(fd.Type))
+                );
+            }).ToArray();
+
+            // Types = Types.Where(td =>
+            // {
+            //     return td.Location == Location.Public || Functions.Any(
+            //         fn => fn.Overloads.Any(
+            //             fno =>
+            //                 !(fno.IsConstructor || fno.IsDestructor)
+            //                 && (
+            //                     fno.ReturnType.Contains(td.Name)
+            //                     || fno.Parameters.Any(
+            //                         fnop => fnop.Type.Contains(td.Name)
+            //                     )
+            //                 )
+            //         )
+            //     );
+            // }).ToArray();
+            //
+            // int lastSizeTypes;
+            // do
+            // {
+            //     lastSizeTypes = Types.Length;
+            //     Types = Types.Where(td =>
+            //     {
+            //         return td.Fields.All(fd => fd.IsEnum
+            //             ? Enums.Any(ed => ed.FriendlyName == fd.Type)
+            //             : IsValidCustomTypeOrBuiltIn(fd.Type)
+            //         );
+            //     }).ToArray();
+            // } while (lastSizeTypes != Types.Length);
+
+            Functions = Functions
+                .Select(fn =>
+                    {
+                        var overloads = fn.Overloads.Where(
+                            fno =>
+                                fno.Location == Location.Public
+                                || (
+                                    IsValidCustomTypeOrBuiltIn(fno.ReturnType)
+                                    && (
+                                        string.IsNullOrWhiteSpace(fno.StructName)
+                                        || Types.Any(td => td.Name == fno.StructName)
+                                    )
+                                    && fno.Parameters.All(fnop => IsValidCustomTypeOrBuiltIn(fnop.Type))
+                                )
+                        ).ToArray();
+                        var result = overloads.Length == 0 ? default : fn.FilterOverloads(fno => overloads.Contains(fno));
+                        return result;
+                    }
+                )
+                .Where(fn => fn != default)
+                .ToArray();
+        }
+
+        bool IsValidCustomTypeOrBuiltIn(string typeName)
+        {
+            var bareTypeName = typeName
+                .Replace("*", string.Empty)
+                .Replace("const", string.Empty)
+                .Trim();
+            switch (bareTypeName)
+            {
+                case "...":
+                case "bool":
+                case "char":
+                case "double":
+                case "float":
+                case "int":
+                case "short":
+                case "unsigned char":
+                case "unsigned int":
+                case "unsigned short":
+                case "void":
+                    return true;
+
+                default:
+                    return TypeInfo.CustomDefinedTypes.Contains(bareTypeName)
+                           || IsValidType(bareTypeName);
+            }
+        }
+
+        bool IsValidType(string typeName)
+        {
+            return !typeName.Contains("union") && (
+                typeName == "..."
+                || typeName.Contains("void")
+                || Enums.Any(ed => typeName.Equals(ed.FriendlyName))
+                || TypeInfo.WellKnownTypes.Keys.Any(key => typeName == key.Replace("*", ""))
+                || Types.Any(td => typeName.Replace("*", "").Split(' ').Contains(td.Name))
+            );
         }
     }
-    
+
+    enum Location
+    {
+        Unknown,
+        Public,
+        Internal
+    }
+
+    abstract class Definition
+    {
+        public Location Location { get; set; }
+
+        protected Definition(Location location)
+        {
+            Location = location;
+        }
+
+    }
+
     class MethodVariant
     {
         public string Name { get; }
@@ -224,7 +372,7 @@ namespace CodeGenerator
         }
     }
 
-    class EnumDefinition
+    class EnumDefinition : Definition
     {
         private readonly Dictionary<string, string> _sanitizedNames;
 
@@ -232,7 +380,7 @@ namespace CodeGenerator
         public string FriendlyName { get; }
         public EnumMember[] Members { get; }
 
-        public EnumDefinition(string name, EnumMember[] elements)
+        public EnumDefinition(string name, Location location, EnumMember[] elements) : base(location)
         {
             Name = name;
             if (Name.EndsWith('_'))
@@ -298,12 +446,12 @@ namespace CodeGenerator
         public string Value { get; }
     }
 
-    class TypeDefinition
+    class TypeDefinition : Definition
     {
         public string Name { get; }
         public TypeReference[] Fields { get; }
 
-        public TypeDefinition(string name, TypeReference[] fields)
+        public TypeDefinition(string name, Location location, TypeReference[] fields) : base(location)
         {
             Name = name;
             Fields = fields;
@@ -424,13 +572,26 @@ namespace CodeGenerator
         public string Name { get; }
         public OverloadDefinition[] Overloads { get; }
 
-        public FunctionDefinition(string name, OverloadDefinition[] overloads, EnumDefinition[] enums)
+        private FunctionDefinition(string name, OverloadDefinition[] overloads)
         {
             Name = name;
-            Overloads = ExpandOverloadVariants(overloads, enums);
+            Overloads = overloads;
         }
 
-        private OverloadDefinition[] ExpandOverloadVariants(OverloadDefinition[] overloads, EnumDefinition[] enums)
+        public FunctionDefinition(string name, OverloadDefinition[] overloads, EnumDefinition[] enums)
+            : this(name, ExpandOverloadVariants(overloads, enums))
+        {
+        }
+
+        public FunctionDefinition FilterOverloads(Func<OverloadDefinition, bool> predicate)
+        {
+            return new(Name, Overloads.Where(predicate).ToArray());
+        }
+
+        public bool ReferencesType(TypeDefinition typeDefinition) =>
+            Overloads.Any(overload => overload.ReferencesType(typeDefinition));
+
+        private static OverloadDefinition[] ExpandOverloadVariants(OverloadDefinition[] overloads, EnumDefinition[] enums)
         {
             List<OverloadDefinition> newDefinitions = new List<OverloadDefinition>();
 
@@ -484,7 +645,7 @@ namespace CodeGenerator
         }
     }
 
-    class OverloadDefinition
+    class OverloadDefinition : Definition
     {
         public string ExportedName { get; }
         public string FriendlyName { get; }
@@ -498,6 +659,7 @@ namespace CodeGenerator
         public bool IsDestructor { get; }
 
         public OverloadDefinition(
+            Location location,
             string exportedName,
             string friendlyName,
             TypeReference[] parameters,
@@ -507,6 +669,7 @@ namespace CodeGenerator
             string comment,
             bool isConstructor,
             bool isDestructor)
+            : base(location)
         {
             ExportedName = exportedName;
             FriendlyName = friendlyName;
@@ -520,9 +683,22 @@ namespace CodeGenerator
             IsDestructor = isDestructor;
         }
 
+        public bool ReferencesType(TypeDefinition typeDefinition)
+        {
+            if (ReturnType == typeDefinition.Name)
+            {
+                return true;
+            }
+
+            return typeDefinition.Name == ReturnType
+                .Replace("const", string.Empty)
+                .Replace("*", string.Empty)
+                .Trim();
+        }
+
         public OverloadDefinition WithParameters(TypeReference[] parameters)
         {
-            return new OverloadDefinition(ExportedName, FriendlyName, parameters, DefaultValues, ReturnType, StructName, Comment, IsConstructor, IsDestructor);
+            return new OverloadDefinition(Location, ExportedName, FriendlyName, parameters, DefaultValues, ReturnType, StructName, Comment, IsConstructor, IsDestructor);
         }
     }
 }

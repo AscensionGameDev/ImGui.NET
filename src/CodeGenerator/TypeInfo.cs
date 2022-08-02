@@ -51,7 +51,17 @@ namespace CodeGenerator
             { "float&", "float*" },
             { "ImVec2[2]", "Vector2*" },
             { "char* []", "byte**" },
-            { "unsigned char[256]", "byte*"},
+            { "unsigned char[256]", "byte*" },
+            { "char[5]", "byte*" },
+            { "ImGuiDir*", "IntPtr" },
+            { "ImGuiStoragePair", "IntPtr" },
+            { "ImGuiDockRequest", "IntPtr" },
+            { "ImGuiDockNodeSettings", "IntPtr" },
+            { "ImGuiTableColumnIdx", "sbyte" },
+            { "ImGuiTableDrawChannelIdx", "byte" },
+            { "ImGuiContextHookCallback", "IntPtr" },
+            { "ImGuiErrorLogCallback", "IntPtr" },
+            { "ImGuiSizeCallback", "IntPtr" },
         };
         
         public static readonly List<string> WellKnownEnums = new List<string>()
